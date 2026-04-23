@@ -2,18 +2,24 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from streamlit_autorefresh import st_autorefresh
 
-# ---------------------------
-# PAGE CONFIG (CLEAN UI)
-# ---------------------------
-st.set_page_config(page_title="Smart Trading Terminal", layout="wide")
+# =========================================================
+# PAGE CONFIG
+# =========================================================
+st.set_page_config(page_title="Live Trading Terminal", layout="wide")
 
-st.title("📊 Smart Options Trading Terminal")
-st.markdown("### Clean, structured and realistic trading dashboard")
+st.title("📊 Live Smart Trading Terminal (Simulated Market)")
+st.markdown("### Real-time moving index + options chain + P&L system")
 
-# ---------------------------
-# SESSION STATE
-# ---------------------------
+# =========================================================
+# AUTO REFRESH (THIS MAKES IT LIVE 🔥)
+# =========================================================
+st_autorefresh(interval=1000, key="live_refresh")  # 1 sec refresh
+
+# =========================================================
+# SESSION STATE INIT
+# =========================================================
 if "price" not in st.session_state:
     st.session_state.price = 22000
 
@@ -26,63 +32,64 @@ if "positions" not in st.session_state:
 if "balance" not in st.session_state:
     st.session_state.balance = 100000
 
-# ---------------------------
-# MARKET ENGINE (LESS RANDOM, MORE REALISTIC)
-# ---------------------------
+# =========================================================
+# LIVE MARKET ENGINE (REALISTIC MOTION)
+# =========================================================
 noise = np.random.normal(0, 25)
 
-trend_bias = np.tanh(np.mean(np.diff(st.session_state.history[-10:]))) * 10
+trend = np.tanh(np.mean(np.diff(st.session_state.history[-10:]))) * 10
 
-st.session_state.price += noise + trend_bias
+shock = np.random.choice([0, 0, 0, 60, -60], p=[0.7, 0.2, 0.05, 0.025, 0.025])
 
-st.session_state.history.append(st.session_state.price)
+new_price = st.session_state.price + noise + trend + shock * 0.2
+
+st.session_state.price = new_price
+st.session_state.history.append(new_price)
+
 st.session_state.history = st.session_state.history[-120:]
 
 price = st.session_state.price
-series = pd.Series(st.session_state.history)
 
-# ---------------------------
-# INDICATORS (REAL STRUCTURE)
-# ---------------------------
-sma20 = series.rolling(20).mean().iloc[-1]
-sma50 = series.rolling(50).mean().iloc[-1]
+# =========================================================
+# INDICATORS (RSI + SMA)
+# =========================================================
+series = pd.Series(st.session_state.history)
 
 delta = series.diff()
 gain = delta.where(delta > 0, 0).rolling(14).mean()
 loss = -delta.where(delta < 0, 0).rolling(14).mean()
+
 rs = gain / loss
 rsi = float(100 - (100 / (1 + rs)).iloc[-1])
 
-# ---------------------------
-# SMART SIGNAL ENGINE (FIXED LOGIC)
-# ---------------------------
+sma20 = series.rolling(20).mean().iloc[-1]
+sma50 = series.rolling(50).mean().iloc[-1]
 
-trend = "NEUTRAL"
+# =========================================================
+# SIGNAL ENGINE (FIXED LOGIC)
+# =========================================================
+trend = "SIDEWAYS"
 
 if sma20 > sma50:
-    trend = "UPTREND"
+    trend = "UPTREND 🟢"
 elif sma20 < sma50:
-    trend = "DOWNTREND"
+    trend = "DOWNTREND 🔴"
 
 signal = "NO TRADE 🟡"
 
-if trend == "UPTREND" and rsi < 35:
-    signal = "🟢 BUY CALL (Strong Bullish Setup)"
-elif trend == "DOWNTREND" and rsi > 65:
-    signal = "🔴 BUY PUT (Strong Bearish Setup)"
-elif rsi > 75:
-    signal = "🔴 OVERBOUGHT - PUT BIAS"
-elif rsi < 25:
-    signal = "🟢 OVERSOLD - CALL BIAS"
+if trend == "UPTREND 🟢" and rsi < 35:
+    signal = "🟢 BUY CALL"
+elif trend == "DOWNTREND 🔴" and rsi > 65:
+    signal = "🔴 BUY PUT"
 
-# ---------------------------
-# OPTION PRICING
-# ---------------------------
+# =========================================================
+# OPTION PRICING (LIVE LINKED)
+# =========================================================
 def call_price(strike):
-    return max(10, (price - strike) + np.random.uniform(60, 120))
+    return max(10, (price - strike) + np.random.uniform(80, 140))
 
 def put_price(strike):
-    return max(10, (strike - price) + np.random.uniform(60, 120))
+    return max(10, (strike - price) + np.random.uniform(80, 140))
 
 strikes = [price + i for i in [-300, -200, -100, 0, 100, 200, 300]]
 
@@ -92,12 +99,12 @@ options = pd.DataFrame({
     "PUT": [round(put_price(s), 2) for s in strikes]
 })
 
-# ---------------------------
-# TOP DASHBOARD METRICS
-# ---------------------------
+# =========================================================
+# TOP DASHBOARD
+# =========================================================
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("Index", round(price, 2))
+col1.metric("NIFTY", round(price, 2))
 col2.metric("RSI", round(rsi, 2))
 col3.metric("Trend", trend)
 col4.metric("Signal", signal)
@@ -105,15 +112,15 @@ col4.metric("Signal", signal)
 st.divider()
 
 # =========================================================
-# 1️⃣ CLEAN LIVE CHART
+# 1️⃣ LIVE MOVING CHART
 # =========================================================
-st.subheader("📈 Market Trend")
+st.subheader("📈 Live Market Chart")
 
 fig = go.Figure()
 
 fig.add_trace(go.Scatter(
-    y=series,
-    name="Price",
+    y=st.session_state.history,
+    name="NIFTY",
     line=dict(color="white", width=2)
 ))
 
@@ -134,7 +141,7 @@ fig.update_layout(template="plotly_dark", height=450)
 st.plotly_chart(fig, use_container_width=True)
 
 # =========================================================
-# 2️⃣ OPTIONS (CLEAN TABLE UI)
+# 2️⃣ OPTION CHAIN
 # =========================================================
 st.subheader("📊 Option Chain")
 
@@ -142,26 +149,28 @@ colA, colB = st.columns(2)
 
 with colA:
     st.markdown("### CALL OPTIONS")
+
     for i, row in options.iterrows():
         if st.button(f"BUY CALL {row['Strike']}", key=f"c{i}"):
             st.session_state.positions.append(("CALL", row["Strike"], row["CALL"]))
             st.session_state.balance -= row["CALL"]
 
-        st.write(f"Strike: {row['Strike']} | Premium: {row['CALL']}")
+        st.write(f"{row['Strike']} | {row['CALL']}")
 
 with colB:
     st.markdown("### PUT OPTIONS")
+
     for i, row in options.iterrows():
         if st.button(f"BUY PUT {row['Strike']}", key=f"p{i}"):
             st.session_state.positions.append(("PUT", row["Strike"], row["PUT"]))
             st.session_state.balance -= row["PUT"]
 
-        st.write(f"Strike: {row['Strike']} | Premium: {row['PUT']}")
+        st.write(f"{row['Strike']} | {row['PUT']}")
 
 st.divider()
 
 # =========================================================
-# 3️⃣ PORTFOLIO (CLEAN P&L)
+# 3️⃣ PORTFOLIO + P&L
 # =========================================================
 st.subheader("💼 Portfolio")
 
@@ -187,22 +196,22 @@ col1.metric("Balance", round(st.session_state.balance, 2))
 col2.metric("Total P&L", round(total_pnl, 2))
 
 # =========================================================
-# 4️⃣ CLEAN SIGNAL PANEL
+# 4️⃣ SIGNAL PANEL
 # =========================================================
-st.subheader("🧠 Trading Signal Engine (Improved)")
+st.subheader("🧠 Trading Intelligence")
 
 st.info(f"""
-### 📌 Market Conditions
+### Market State
 - Trend: {trend}
 - RSI: {round(rsi,2)}
 - SMA20: {round(sma20,2)}
 - SMA50: {round(sma50,2)}
 
-### 🎯 Signal
+### Signal
 **{signal}**
 
-### 📊 Logic Used
-- Trend following (SMA crossover)
-- Momentum filter (RSI)
-- Overbought/oversold zones
+### Logic
+- Trend + RSI filter
+- Momentum confirmation
+- No random signals anymore
 """)
