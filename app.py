@@ -2,216 +2,205 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import random
+from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# =========================================================
-# PAGE CONFIG
-# =========================================================
-st.set_page_config(page_title="Live Trading Terminal", layout="wide")
+# -----------------------------
+# CONFIG
+# -----------------------------
+st.set_page_config(page_title="AI Stock Market Simulator", layout="wide")
 
-st.title("📊 Live Smart Trading Terminal (Simulated Market)")
-st.markdown("### Real-time moving index + options chain + P&L system")
+# Auto refresh every 2 seconds
+st_autorefresh(interval=2000, key="market_refresh")
 
-# =========================================================
-# AUTO REFRESH (THIS MAKES IT LIVE 🔥)
-# =========================================================
-st_autorefresh(interval=1000, key="live_refresh")  # 1 sec refresh
+# -----------------------------
+# INITIAL SETUP
+# -----------------------------
+STOCKS = ["AAPL", "TSLA", "INFY", "TCS", "RELIANCE"]
 
-# =========================================================
-# SESSION STATE INIT
-# =========================================================
-if "price" not in st.session_state:
-    st.session_state.price = 22000
+if "cash" not in st.session_state:
+    st.session_state.cash = 100000
+
+if "portfolio" not in st.session_state:
+    st.session_state.portfolio = {s: {"qty": 0, "avg_price": 0} for s in STOCKS}
+
+if "prices" not in st.session_state:
+    st.session_state.prices = {s: random.uniform(100, 3000) for s in STOCKS}
 
 if "history" not in st.session_state:
-    st.session_state.history = [st.session_state.price]
+    st.session_state.history = {s: [] for s in STOCKS}
 
-if "positions" not in st.session_state:
-    st.session_state.positions = []
+# -----------------------------
+# MARKET SIMULATION ENGINE
+# -----------------------------
+def update_prices():
+    for stock in STOCKS:
+        old_price = st.session_state.prices[stock]
 
-if "balance" not in st.session_state:
-    st.session_state.balance = 100000
+        # random walk with drift + volatility
+        drift = random.uniform(-0.5, 0.5)
+        shock = np.random.normal(0, 1)
 
-# =========================================================
-# LIVE MARKET ENGINE (REALISTIC MOTION)
-# =========================================================
-noise = np.random.normal(0, 25)
+        new_price = old_price * (1 + (drift + shock) / 100)
 
-trend = np.tanh(np.mean(np.diff(st.session_state.history[-10:]))) * 10
+        new_price = max(10, new_price)  # prevent collapse
 
-shock = np.random.choice([0, 0, 0, 60, -60], p=[0.7, 0.2, 0.05, 0.025, 0.025])
+        st.session_state.prices[stock] = round(new_price, 2)
 
-new_price = st.session_state.price + noise + trend + shock * 0.2
+        # store history (last 30 points)
+        st.session_state.history[stock].append(new_price)
+        if len(st.session_state.history[stock]) > 30:
+            st.session_state.history[stock].pop(0)
 
-st.session_state.price = new_price
-st.session_state.history.append(new_price)
+update_prices()
 
-st.session_state.history = st.session_state.history[-120:]
+# -----------------------------
+# CALCULATIONS
+# -----------------------------
+def portfolio_value():
+    total = st.session_state.cash
+    for stock in STOCKS:
+        qty = st.session_state.portfolio[stock]["qty"]
+        total += qty * st.session_state.prices[stock]
+    return total
 
-price = st.session_state.price
+# -----------------------------
+# BUY / SELL FUNCTIONS
+# -----------------------------
+def buy(stock, qty):
+    price = st.session_state.prices[stock]
+    cost = price * qty
 
-# =========================================================
-# INDICATORS (RSI + SMA)
-# =========================================================
-series = pd.Series(st.session_state.history)
+    if st.session_state.cash >= cost:
+        p = st.session_state.portfolio[stock]
 
-delta = series.diff()
-gain = delta.where(delta > 0, 0).rolling(14).mean()
-loss = -delta.where(delta < 0, 0).rolling(14).mean()
+        new_qty = p["qty"] + qty
+        new_avg = ((p["qty"] * p["avg_price"]) + cost) / new_qty if new_qty > 0 else 0
 
-rs = gain / loss
-rsi = float(100 - (100 / (1 + rs)).iloc[-1])
+        st.session_state.portfolio[stock]["qty"] = new_qty
+        st.session_state.portfolio[stock]["avg_price"] = new_avg
 
-sma20 = series.rolling(20).mean().iloc[-1]
-sma50 = series.rolling(50).mean().iloc[-1]
+        st.session_state.cash -= cost
 
-# =========================================================
-# SIGNAL ENGINE (FIXED LOGIC)
-# =========================================================
-trend = "SIDEWAYS"
+def sell(stock, qty):
+    p = st.session_state.portfolio[stock]
+    if p["qty"] >= qty:
+        price = st.session_state.prices[stock]
+        revenue = price * qty
 
-if sma20 > sma50:
-    trend = "UPTREND 🟢"
-elif sma20 < sma50:
-    trend = "DOWNTREND 🔴"
+        p["qty"] -= qty
+        st.session_state.cash += revenue
 
-signal = "NO TRADE 🟡"
+# -----------------------------
+# UI LAYOUT
+# -----------------------------
+st.title("📊 AI Stock Market Simulator (Groww-like)")
 
-if trend == "UPTREND 🟢" and rsi < 35:
-    signal = "🟢 BUY CALL"
-elif trend == "DOWNTREND 🔴" and rsi > 65:
-    signal = "🔴 BUY PUT"
+# Sidebar - Portfolio Summary
+with st.sidebar:
+    st.header("💼 Portfolio")
 
-# =========================================================
-# OPTION PRICING (LIVE LINKED)
-# =========================================================
-def call_price(strike):
-    return max(10, (price - strike) + np.random.uniform(80, 140))
+    total_value = portfolio_value()
+    pnl = total_value - 100000
 
-def put_price(strike):
-    return max(10, (strike - price) + np.random.uniform(80, 140))
+    st.metric("Cash Balance", f"₹{st.session_state.cash:,.2f}")
+    st.metric("Total Portfolio Value", f"₹{total_value:,.2f}")
+    st.metric("P&L", f"₹{pnl:,.2f}")
 
-strikes = [price + i for i in [-300, -200, -100, 0, 100, 200, 300]]
+    st.divider()
 
-options = pd.DataFrame({
-    "Strike": strikes,
-    "CALL": [round(call_price(s), 2) for s in strikes],
-    "PUT": [round(put_price(s), 2) for s in strikes]
-})
+    st.subheader("Holdings")
+    for s in STOCKS:
+        qty = st.session_state.portfolio[s]["qty"]
+        if qty > 0:
+            st.write(f"{s}: {qty} shares")
 
-# =========================================================
-# TOP DASHBOARD
-# =========================================================
-col1, col2, col3, col4 = st.columns(4)
+# -----------------------------
+# STOCK TABLE
+# -----------------------------
+st.subheader("📈 Live Market")
 
-col1.metric("NIFTY", round(price, 2))
-col2.metric("RSI", round(rsi, 2))
-col3.metric("Trend", trend)
-col4.metric("Signal", signal)
+cols = st.columns(len(STOCKS))
 
-st.divider()
+for i, stock in enumerate(STOCKS):
+    price = st.session_state.prices[stock]
+    history = st.session_state.history[stock]
 
-# =========================================================
-# 1️⃣ LIVE MOVING CHART
-# =========================================================
-st.subheader("📈 Live Market Chart")
+    change = np.random.uniform(-2, 2)
 
-fig = go.Figure()
+    with cols[i]:
+        st.markdown(f"### {stock}")
+        st.metric("Price", f"₹{price:.2f}", f"{change:.2f}%")
 
-fig.add_trace(go.Scatter(
-    y=st.session_state.history,
-    name="NIFTY",
-    line=dict(color="white", width=2)
-))
+        # mini sparkline
+        if len(history) > 2:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                y=history,
+                mode="lines",
+                line=dict(color="green" if change >= 0 else "red")
+            ))
+            fig.update_layout(
+                height=120,
+                margin=dict(l=0, r=0, t=0, b=0),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False)
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-fig.add_trace(go.Scatter(
-    y=series.rolling(20).mean(),
-    name="SMA 20",
-    line=dict(color="blue")
-))
+# -----------------------------
+# TRADING PANEL
+# -----------------------------
+st.subheader("💰 Trade Stocks")
 
-fig.add_trace(go.Scatter(
-    y=series.rolling(50).mean(),
-    name="SMA 50",
-    line=dict(color="orange")
-))
+col1, col2, col3 = st.columns(3)
 
-fig.update_layout(template="plotly_dark", height=450)
+with col1:
+    selected_stock = st.selectbox("Select Stock", STOCKS)
 
-st.plotly_chart(fig, use_container_width=True)
+with col2:
+    qty = st.number_input("Quantity", min_value=1, step=1)
 
-# =========================================================
-# 2️⃣ OPTION CHAIN
-# =========================================================
-st.subheader("📊 Option Chain")
+with col3:
+    st.write("")
+    buy_btn = st.button("Buy 🟢")
+    sell_btn = st.button("Sell 🔴")
 
-colA, colB = st.columns(2)
+if buy_btn:
+    buy(selected_stock, qty)
+    st.success(f"Bought {qty} {selected_stock}")
 
-with colA:
-    st.markdown("### CALL OPTIONS")
-
-    for i, row in options.iterrows():
-        if st.button(f"BUY CALL {row['Strike']}", key=f"c{i}"):
-            st.session_state.positions.append(("CALL", row["Strike"], row["CALL"]))
-            st.session_state.balance -= row["CALL"]
-
-        st.write(f"{row['Strike']} | {row['CALL']}")
-
-with colB:
-    st.markdown("### PUT OPTIONS")
-
-    for i, row in options.iterrows():
-        if st.button(f"BUY PUT {row['Strike']}", key=f"p{i}"):
-            st.session_state.positions.append(("PUT", row["Strike"], row["PUT"]))
-            st.session_state.balance -= row["PUT"]
-
-        st.write(f"{row['Strike']} | {row['PUT']}")
-
-st.divider()
-
-# =========================================================
-# 3️⃣ PORTFOLIO + P&L
-# =========================================================
-st.subheader("💼 Portfolio")
-
-total_pnl = 0
-
-for pos in st.session_state.positions:
-
-    typ, strike, entry = pos
-
-    if typ == "CALL":
-        current = max(0, price - strike)
+if sell_btn:
+    if st.session_state.portfolio[selected_stock]["qty"] >= qty:
+        sell(selected_stock, qty)
+        st.success(f"Sold {qty} {selected_stock}")
     else:
-        current = max(0, strike - price)
+        st.error("Not enough shares to sell")
 
-    pnl = current - entry
-    total_pnl += pnl
+# -----------------------------
+# PORTFOLIO DETAILS TABLE
+# -----------------------------
+st.subheader("📊 Detailed Portfolio")
 
-    st.write(f"{typ} | Strike {strike} | Entry {entry:.2f} | P&L {pnl:.2f}")
+rows = []
 
-col1, col2 = st.columns(2)
+for stock in STOCKS:
+    qty = st.session_state.portfolio[stock]["qty"]
+    avg = st.session_state.portfolio[stock]["avg_price"]
+    current = st.session_state.prices[stock]
 
-col1.metric("Balance", round(st.session_state.balance, 2))
-col2.metric("Total P&L", round(total_pnl, 2))
+    pnl = (current - avg) * qty if qty > 0 else 0
 
-# =========================================================
-# 4️⃣ SIGNAL PANEL
-# =========================================================
-st.subheader("🧠 Trading Intelligence")
+    rows.append([stock, qty, avg, current, pnl])
 
-st.info(f"""
-### Market State
-- Trend: {trend}
-- RSI: {round(rsi,2)}
-- SMA20: {round(sma20,2)}
-- SMA50: {round(sma50,2)}
+df = pd.DataFrame(rows, columns=[
+    "Stock", "Qty", "Avg Price", "Current Price", "P&L"
+])
 
-### Signal
-**{signal}**
+st.dataframe(df, use_container_width=True)
 
-### Logic
-- Trend + RSI filter
-- Momentum confirmation
-- No random signals anymore
-""")
+# -----------------------------
+# FOOTER
+# -----------------------------
+st.caption("⚠️ This is a simulated trading environment. No real money involved.")
