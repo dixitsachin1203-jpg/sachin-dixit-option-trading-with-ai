@@ -2,57 +2,81 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import time
 
 # ---------------------------
-# PAGE CONFIG (FINTECH UI)
+# PAGE CONFIG
 # ---------------------------
-st.set_page_config(page_title="Global Market Simulator", layout="wide")
+st.set_page_config(page_title="Live Market Simulator", layout="wide")
 
-st.markdown("""
-<style>
-.main {background-color:#0e1117;}
-.block-container {padding-top:2rem;}
-</style>
-""", unsafe_allow_html=True)
-
-st.title("🌍 Global Market Intelligence Simulator")
-st.markdown("### Fake live market + technical analysis engine")
+st.title("🌍 Real-Time Market Dynamics Simulator")
+st.markdown("### Simulated live market with changing volatility & trends")
 
 # ---------------------------
-# MARKET SELECTION
+# AUTO REFRESH (LIVE FEEL)
 # ---------------------------
-market = st.selectbox("Select Market Index", [
-    "🇮🇳 NIFTY 50",
-    "🇮🇳 SENSEX",
-    "🇺🇸 NASDAQ",
-    "🇺🇸 DOW JONES"
-])
+st_autorefresh = st.empty()
 
 # ---------------------------
-# BASE PRICE SETTINGS
+# MARKET SELECT
 # ---------------------------
+market = st.selectbox("Select Index", ["NIFTY 50", "SENSEX", "NASDAQ", "DOW JONES"])
+
 base_prices = {
-    "🇮🇳 NIFTY 50": 22000,
-    "🇮🇳 SENSEX": 72000,
-    "🇺🇸 NASDAQ": 17000,
-    "🇺🇸 DOW JONES": 38000
+    "NIFTY 50": 22000,
+    "SENSEX": 72000,
+    "NASDAQ": 17000,
+    "DOW JONES": 38000
 }
 
 base = base_prices[market]
 
 # ---------------------------
-# FAKE MARKET GENERATION (LIVE SIMULATION)
+# SESSION STATE (LIVE MEMORY)
 # ---------------------------
-np.random.seed(42)
+if "prices" not in st.session_state:
+    st.session_state.prices = [base]
+    st.session_state.trend = np.random.choice(["bull", "bear", "sideways"])
 
-days = 60
-prices = [base]
+# ---------------------------
+# TREND SWITCHING ENGINE
+# ---------------------------
+def change_trend():
+    return np.random.choice(["bull", "bear", "sideways"], p=[0.4, 0.3, 0.3])
 
-for i in range(days):
-    change = np.random.normal(0, 1.2)
-    prices.append(prices[-1] * (1 + change/100))
+# ---------------------------
+# PRICE GENERATOR (REALISTIC DYNAMICS)
+# ---------------------------
+def generate_next_price(prev, trend):
+    # base noise
+    noise = np.random.normal(0, 0.6)
 
-df = pd.DataFrame({"Close": prices})
+    # trend bias
+    if trend == "bull":
+        drift = 0.4
+    elif trend == "bear":
+        drift = -0.4
+    else:
+        drift = 0
+
+    # volatility spike (news-like shock)
+    shock = np.random.choice([0, 0, 0, 2, -2])
+
+    return prev * (1 + (noise + drift + shock) / 100)
+
+# ---------------------------
+# UPDATE PRICE
+# ---------------------------
+if np.random.rand() < 0.1:
+    st.session_state.trend = change_trend()
+
+new_price = generate_next_price(st.session_state.prices[-1], st.session_state.trend)
+st.session_state.prices.append(new_price)
+
+# keep last 80 points
+st.session_state.prices = st.session_state.prices[-80:]
+
+df = pd.DataFrame({"Close": st.session_state.prices})
 
 # ---------------------------
 # INDICATORS
@@ -60,7 +84,6 @@ df = pd.DataFrame({"Close": prices})
 df["SMA20"] = df["Close"].rolling(20).mean()
 df["SMA50"] = df["Close"].rolling(50).mean()
 
-# RSI FUNCTION
 def rsi(series, period=14):
     delta = series.diff()
     gain = delta.where(delta > 0, 0).rolling(period).mean()
@@ -77,18 +100,21 @@ rsi_val = latest["RSI"]
 sma20 = latest["SMA20"]
 sma50 = latest["SMA50"]
 
+# ---------------------------
+# SUPPORT / RESISTANCE
+# ---------------------------
 support = df["Close"].min()
 resistance = df["Close"].max()
 
 # ---------------------------
-# MARKET SIGNAL ENGINE
+# SIGNAL ENGINE (REALISTIC LOGIC)
 # ---------------------------
 signal = "NEUTRAL 🟡"
 
 if rsi_val < 30 and sma20 > sma50:
-    signal = "BULLISH 🟢 (CALL bias)"
+    signal = "BULLISH 🟢 (CALL BIAS)"
 elif rsi_val > 70 and sma20 < sma50:
-    signal = "BEARISH 🔴 (PUT bias)"
+    signal = "BEARISH 🔴 (PUT BIAS)"
 
 # ---------------------------
 # DASHBOARD METRICS
@@ -97,19 +123,19 @@ col1, col2, col3 = st.columns(3)
 
 col1.metric("Index", market)
 col2.metric("Price", round(price, 2))
-col3.metric("Signal", signal)
+col3.metric("Market Mood", st.session_state.trend.upper())
 
 st.divider()
 
 # ---------------------------
-# CHART 1: MARKET TREND
+# LIVE PRICE CHART
 # ---------------------------
 fig = go.Figure()
 
 fig.add_trace(go.Scatter(
     y=df["Close"],
     name="Price",
-    line=dict(color="white")
+    line=dict(color="white", width=2)
 ))
 
 fig.add_trace(go.Scatter(
@@ -127,16 +153,12 @@ fig.add_trace(go.Scatter(
 fig.add_hline(y=support, line_color="green", annotation_text="Support")
 fig.add_hline(y=resistance, line_color="red", annotation_text="Resistance")
 
-fig.update_layout(
-    template="plotly_dark",
-    height=500,
-    title="Market Trend Analysis"
-)
+fig.update_layout(template="plotly_dark", height=550)
 
 st.plotly_chart(fig, use_container_width=True)
 
 # ---------------------------
-# CHART 2: RSI INDICATOR
+# RSI CHART
 # ---------------------------
 fig2 = go.Figure()
 
@@ -149,42 +171,30 @@ fig2.add_trace(go.Scatter(
 fig2.add_hline(y=70, line_dash="dash", line_color="red")
 fig2.add_hline(y=30, line_dash="dash", line_color="green")
 
-fig2.update_layout(
-    template="plotly_dark",
-    title="RSI Indicator"
-)
+fig2.update_layout(template="plotly_dark", title="RSI Indicator")
 
 st.plotly_chart(fig2, use_container_width=True)
 
 # ---------------------------
-# MARKET INSIGHT PANEL
+# INSIGHT PANEL
 # ---------------------------
-st.subheader("🧠 Market Analysis Engine")
+st.subheader("🧠 Live Market Intelligence")
 
 st.write(f"""
-### 📊 Technical Summary
+### 📊 Current Market State
+- Trend Regime: {st.session_state.trend}
 - RSI: {round(rsi_val,2) if not np.isnan(rsi_val) else 'N/A'}
-- SMA 20: {round(sma20,2) if not np.isnan(sma20) else 'N/A'}
-- SMA 50: {round(sma50,2) if not np.isnan(sma50) else 'N/A'}
-
-### 📌 Levels
-- Support: {round(support,2)}
-- Resistance: {round(resistance,2)}
+- SMA20 vs SMA50: {'Bullish' if sma20 > sma50 else 'Bearish'}
 
 ### 🎯 Signal
 **{signal}**
 
-👉 This is a technical-based sentiment signal using RSI + SMA crossover logic.
+### ⚠️ Note
+This is a simulated market with dynamic trend switching + volatility shocks.
 """)
 
 # ---------------------------
-# FINAL SENTIMENT CARD
+# AUTO REFRESH LOOP
 # ---------------------------
-st.divider()
-
-if "BULLISH" in signal:
-    st.success("Market sentiment is bullish. Buyers dominate momentum.")
-elif "BEARISH" in signal:
-    st.error("Market sentiment is bearish. Selling pressure dominates.")
-else:
-    st.warning("Market is neutral. No strong directional trend.")
+time.sleep(1)
+st.rerun()
