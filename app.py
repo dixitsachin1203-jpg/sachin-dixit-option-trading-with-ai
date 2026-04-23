@@ -1,200 +1,164 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
-import time
 
 # ---------------------------
 # PAGE CONFIG
 # ---------------------------
-st.set_page_config(page_title="Live Market Simulator", layout="wide")
+st.set_page_config(page_title="Options Chain Simulator", layout="wide")
 
-st.title("🌍 Real-Time Market Dynamics Simulator")
-st.markdown("### Simulated live market with changing volatility & trends")
-
-# ---------------------------
-# AUTO REFRESH (LIVE FEEL)
-# ---------------------------
-st_autorefresh = st.empty()
+st.title("📊 Options Chain Trading Simulator (CALL vs PUT)")
+st.markdown("### Paper trading terminal with live-like option movement")
 
 # ---------------------------
-# MARKET SELECT
+# SESSION STATE (TRADING ACCOUNT)
 # ---------------------------
-market = st.selectbox("Select Index", ["NIFTY 50", "SENSEX", "NASDAQ", "DOW JONES"])
-
-base_prices = {
-    "NIFTY 50": 22000,
-    "SENSEX": 72000,
-    "NASDAQ": 17000,
-    "DOW JONES": 38000
-}
-
-base = base_prices[market]
+if "balance" not in st.session_state:
+    st.session_state.balance = 100000
+    st.session_state.positions = []
 
 # ---------------------------
-# SESSION STATE (LIVE MEMORY)
+# SIMULATED INDEX
 # ---------------------------
-if "prices" not in st.session_state:
-    st.session_state.prices = [base]
-    st.session_state.trend = np.random.choice(["bull", "bear", "sideways"])
+base_price = 22000
 
-# ---------------------------
-# TREND SWITCHING ENGINE
-# ---------------------------
-def change_trend():
-    return np.random.choice(["bull", "bear", "sideways"], p=[0.4, 0.3, 0.3])
+if "price" not in st.session_state:
+    st.session_state.price = base_price
 
-# ---------------------------
-# PRICE GENERATOR (REALISTIC DYNAMICS)
-# ---------------------------
-def generate_next_price(prev, trend):
-    # base noise
-    noise = np.random.normal(0, 0.6)
+# simulate movement
+move = np.random.normal(0, 50)
+st.session_state.price += move
 
-    # trend bias
-    if trend == "bull":
-        drift = 0.4
-    elif trend == "bear":
-        drift = -0.4
-    else:
-        drift = 0
-
-    # volatility spike (news-like shock)
-    shock = np.random.choice([0, 0, 0, 2, -2])
-
-    return prev * (1 + (noise + drift + shock) / 100)
+index_price = st.session_state.price
 
 # ---------------------------
-# UPDATE PRICE
+# RSI SIMULATION
 # ---------------------------
-if np.random.rand() < 0.1:
-    st.session_state.trend = change_trend()
-
-new_price = generate_next_price(st.session_state.prices[-1], st.session_state.trend)
-st.session_state.prices.append(new_price)
-
-# keep last 80 points
-st.session_state.prices = st.session_state.prices[-80:]
-
-df = pd.DataFrame({"Close": st.session_state.prices})
+rsi = np.random.randint(25, 75)
 
 # ---------------------------
-# INDICATORS
+# OPTION PRICING MODEL (SIMPLIFIED)
 # ---------------------------
-df["SMA20"] = df["Close"].rolling(20).mean()
-df["SMA50"] = df["Close"].rolling(50).mean()
+def call_premium(strike, spot):
+    return max(0, spot - strike + np.random.uniform(80, 200))
 
-def rsi(series, period=14):
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0).rolling(period).mean()
-    loss = -delta.where(delta < 0, 0).rolling(period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-df["RSI"] = rsi(df["Close"])
-
-latest = df.iloc[-1]
-
-price = latest["Close"]
-rsi_val = latest["RSI"]
-sma20 = latest["SMA20"]
-sma50 = latest["SMA50"]
+def put_premium(strike, spot):
+    return max(0, strike - spot + np.random.uniform(80, 200))
 
 # ---------------------------
-# SUPPORT / RESISTANCE
+# STRIKE GENERATION
 # ---------------------------
-support = df["Close"].min()
-resistance = df["Close"].max()
+strikes = [index_price + i for i in [-300, -200, -100, 0, 100, 200, 300]]
+
+data = []
+
+for strike in strikes:
+    data.append({
+        "Strike": strike,
+        "CALL": round(call_premium(strike, index_price), 2),
+        "PUT": round(put_premium(strike, index_price), 2)
+    })
+
+df = pd.DataFrame(data)
 
 # ---------------------------
-# SIGNAL ENGINE (REALISTIC LOGIC)
+# SIGNAL ENGINE
 # ---------------------------
 signal = "NEUTRAL 🟡"
 
-if rsi_val < 30 and sma20 > sma50:
-    signal = "BULLISH 🟢 (CALL BIAS)"
-elif rsi_val > 70 and sma20 < sma50:
-    signal = "BEARISH 🔴 (PUT BIAS)"
+if rsi < 30:
+    signal = "BULLISH 🟢 (CALL BUY BIAS)"
+elif rsi > 70:
+    signal = "BEARISH 🔴 (PUT BUY BIAS)"
 
 # ---------------------------
-# DASHBOARD METRICS
+# UI TOP METRICS
 # ---------------------------
 col1, col2, col3 = st.columns(3)
 
-col1.metric("Index", market)
-col2.metric("Price", round(price, 2))
-col3.metric("Market Mood", st.session_state.trend.upper())
+col1.metric("Index", round(index_price, 2))
+col2.metric("RSI", rsi)
+col3.metric("Market Bias", signal)
 
 st.divider()
 
 # ---------------------------
-# LIVE PRICE CHART
+# CALL & PUT TABLE SIDE BY SIDE
+# ---------------------------
+colA, colB = st.columns(2)
+
+with colA:
+    st.subheader("📈 CALL OPTIONS")
+    for i, row in df.iterrows():
+        if st.button(f"BUY CALL {row['Strike']}", key=f"call_{i}"):
+            st.session_state.positions.append(("CALL", row["Strike"], row["CALL"]))
+            st.session_state.balance -= row["CALL"]
+
+        st.write(f"Strike: {row['Strike']} | Premium: {row['CALL']}")
+
+with colB:
+    st.subheader("📉 PUT OPTIONS")
+    for i, row in df.iterrows():
+        if st.button(f"BUY PUT {row['Strike']}", key=f"put_{i}"):
+            st.session_state.positions.append(("PUT", row["Strike"], row["PUT"]))
+            st.session_state.balance -= row["PUT"]
+
+        st.write(f"Strike: {row['Strike']} | Premium: {row['PUT']}")
+
+st.divider()
+
+# ---------------------------
+# PORTFOLIO / P&L
+# ---------------------------
+st.subheader("💼 Paper Trading Portfolio")
+
+if st.session_state.positions:
+    total_value = 0
+
+    for pos in st.session_state.positions:
+        typ, strike, premium = pos
+        pnl = np.random.uniform(-50, 150)  # simulated P&L
+        total_value += pnl
+        st.write(f"{typ} {strike} | Entry: {premium} | P&L: {round(pnl,2)}")
+
+    st.metric("Account Balance", st.session_state.balance)
+    st.metric("Total P&L", round(total_value, 2))
+else:
+    st.info("No positions yet")
+
+# ---------------------------
+# VISUAL CHART
 # ---------------------------
 fig = go.Figure()
 
 fig.add_trace(go.Scatter(
-    y=df["Close"],
-    name="Price",
-    line=dict(color="white", width=2)
+    y=df["CALL"],
+    name="CALL Premiums",
+    line=dict(color="green")
 ))
 
 fig.add_trace(go.Scatter(
-    y=df["SMA20"],
-    name="SMA 20",
-    line=dict(color="blue")
+    y=df["PUT"],
+    name="PUT Premiums",
+    line=dict(color="red")
 ))
 
-fig.add_trace(go.Scatter(
-    y=df["SMA50"],
-    name="SMA 50",
-    line=dict(color="orange")
-))
-
-fig.add_hline(y=support, line_color="green", annotation_text="Support")
-fig.add_hline(y=resistance, line_color="red", annotation_text="Resistance")
-
-fig.update_layout(template="plotly_dark", height=550)
+fig.update_layout(template="plotly_dark", title="Options Premium Curve")
 
 st.plotly_chart(fig, use_container_width=True)
 
 # ---------------------------
-# RSI CHART
+# FINAL INSIGHT
 # ---------------------------
-fig2 = go.Figure()
-
-fig2.add_trace(go.Scatter(
-    y=df["RSI"],
-    name="RSI",
-    line=dict(color="purple")
-))
-
-fig2.add_hline(y=70, line_dash="dash", line_color="red")
-fig2.add_hline(y=30, line_dash="dash", line_color="green")
-
-fig2.update_layout(template="plotly_dark", title="RSI Indicator")
-
-st.plotly_chart(fig2, use_container_width=True)
-
-# ---------------------------
-# INSIGHT PANEL
-# ---------------------------
-st.subheader("🧠 Live Market Intelligence")
+st.subheader("🧠 Trading Signal Engine")
 
 st.write(f"""
-### 📊 Current Market State
-- Trend Regime: {st.session_state.trend}
-- RSI: {round(rsi_val,2) if not np.isnan(rsi_val) else 'N/A'}
-- SMA20 vs SMA50: {'Bullish' if sma20 > sma50 else 'Bearish'}
+- Index Movement: Simulated live
+- RSI: {rsi}
+- Market Bias: {signal}
 
-### 🎯 Signal
-**{signal}**
-
-### ⚠️ Note
-This is a simulated market with dynamic trend switching + volatility shocks.
+👉 Use CALL when bullish momentum  
+👉 Use PUT when bearish momentum  
+👉 Avoid trades in neutral zones
 """)
-
-# ---------------------------
-# AUTO REFRESH LOOP
-# ---------------------------
-time.sleep(1)
-st.rerun()
