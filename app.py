@@ -2,17 +2,17 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import time
 
 # ---------------------------
 # PAGE CONFIG
 # ---------------------------
-st.set_page_config(page_title="Institutional Trading Terminal", layout="wide")
+st.set_page_config(page_title="Live Trading Terminal", layout="wide")
 
-st.title("🏦 Institutional Trading Terminal v4 (Ultra Pro Simulator)")
-st.markdown("### Realistic market engine + options chain + trading desk")
+st.title("📊 LIVE Trading Terminal (Simulated Real Market)")
 
 # ---------------------------
-# SESSION STATE
+# SESSION STATE INIT
 # ---------------------------
 if "price" not in st.session_state:
     st.session_state.price = 22000
@@ -27,130 +27,115 @@ if "balance" not in st.session_state:
     st.session_state.balance = 100000
 
 # ---------------------------
-# MARKET ENGINE (REALISTIC DYNAMICS)
+# LIVE MARKET ENGINE
 # ---------------------------
-trend_bias = np.random.choice([-1, 0, 1], p=[0.3, 0.4, 0.3])
+def update_market():
+    move = np.random.normal(0, 30)
 
-volatility = np.random.normal(0, 40)
+    # trend bias
+    bias = np.random.choice([-1, 0, 1], p=[0.3, 0.4, 0.3])
 
-shock = np.random.choice([0, 0, 0, 80, -80])  # news spikes
+    shock = np.random.choice([0, 0, 0, 60, -60])
 
-move = trend_bias * 20 + volatility + shock * 0.2
+    new_price = st.session_state.price + move + bias * 10 + shock * 0.2
 
-st.session_state.price += move
-st.session_state.history.append(st.session_state.price)
+    st.session_state.price = new_price
+    st.session_state.history.append(new_price)
 
-st.session_state.history = st.session_state.history[-120:]
+    st.session_state.history = st.session_state.history[-120:]
+
+# ---------------------------
+# RUN MARKET UPDATE (LIVE FEEL)
+# ---------------------------
+update_market()
 
 price = st.session_state.price
 
 # ---------------------------
-# CANDLESTICK DATA GENERATION
+# RSI CALC
 # ---------------------------
-df = pd.DataFrame(st.session_state.history, columns=["Close"])
+series = pd.Series(st.session_state.history)
 
-df["Open"] = df["Close"].shift(1)
-df["High"] = df[["Open", "Close"]].max(axis=1) + np.random.uniform(5, 30, len(df))
-df["Low"] = df[["Open", "Close"]].min(axis=1) - np.random.uniform(5, 30, len(df))
-
-df = df.dropna()
-
-# ---------------------------
-# RSI + SMA
-# ---------------------------
-delta = df["Close"].diff()
+delta = series.diff()
 gain = delta.where(delta > 0, 0).rolling(14).mean()
 loss = -delta.where(delta < 0, 0).rolling(14).mean()
+
 rs = gain / loss
 rsi = float(100 - (100 / (1 + rs)).iloc[-1])
 
-df["SMA20"] = df["Close"].rolling(20).mean()
-df["SMA50"] = df["Close"].rolling(50).mean()
+# ---------------------------
+# SIGNAL ENGINE
+# ---------------------------
+signal = "NEUTRAL 🟡"
+
+if rsi < 30:
+    signal = "🟢 BUY CALL ZONE"
+elif rsi > 70:
+    signal = "🔴 BUY PUT ZONE"
 
 # ---------------------------
-# SIGNAL ENGINE (INSTITUTIONAL LOGIC)
+# OPTION PRICING (LIVE LINKED)
 # ---------------------------
-signal = "NO TRADE 🟡"
+def call_price(strike):
+    return max(10, (price - strike) + np.random.uniform(80, 160))
 
-if rsi < 30 and df["SMA20"].iloc[-1] > df["SMA50"].iloc[-1]:
-    signal = "🟢 BUY CALL (Institutional Long Setup)"
-elif rsi > 70 and df["SMA20"].iloc[-1] < df["SMA50"].iloc[-1]:
-    signal = "🔴 BUY PUT (Institutional Short Setup)"
+def put_price(strike):
+    return max(10, (strike - price) + np.random.uniform(80, 160))
 
-# ---------------------------
-# STRIKES + OPTIONS
-# ---------------------------
 strikes = [price + i for i in [-300, -200, -100, 0, 100, 200, 300]]
-
-def call_premium(strike):
-    return max(10, (price - strike) + np.random.uniform(100, 200))
-
-def put_premium(strike):
-    return max(10, (strike - price) + np.random.uniform(100, 200))
 
 options = []
 for s in strikes:
     options.append({
         "Strike": round(s),
-        "CALL": round(call_premium(s), 2),
-        "PUT": round(put_premium(s), 2)
+        "CALL": round(call_price(s), 2),
+        "PUT": round(put_price(s), 2)
     })
 
-opt_df = pd.DataFrame(options)
+df = pd.DataFrame(options)
 
 # ---------------------------
 # TOP METRICS
 # ---------------------------
 col1, col2, col3 = st.columns(3)
 
-col1.metric("NIFTY INDEX", round(price, 2))
+col1.metric("NIFTY", round(price, 2))
 col2.metric("RSI", round(rsi, 2))
-col3.metric("SIGNAL", signal)
+col3.metric("Signal", signal)
 
 st.divider()
 
 # =========================================================
-# 1️⃣ CANDLESTICK CHART (INSTITUTIONAL STYLE)
+# 1️⃣ LIVE MOVING CHART (AUTO UPDATING)
 # =========================================================
-st.subheader("📈 NIFTY Candlestick Chart")
+chart_placeholder = st.empty()
 
 fig = go.Figure()
 
-fig.add_trace(go.Candlestick(
-    open=df["Open"],
-    high=df["High"],
-    low=df["Low"],
-    close=df["Close"],
-    name="NIFTY"
-))
-
 fig.add_trace(go.Scatter(
-    y=df["SMA20"],
-    name="SMA20",
-    line=dict(color="blue")
+    y=st.session_state.history,
+    name="NIFTY",
+    line=dict(color="white", width=2)
 ))
 
-fig.add_trace(go.Scatter(
-    y=df["SMA50"],
-    name="SMA50",
-    line=dict(color="orange")
-))
+fig.update_layout(
+    template="plotly_dark",
+    height=450
+)
 
-fig.update_layout(template="plotly_dark", height=500)
-
-st.plotly_chart(fig, use_container_width=True)
+chart_placeholder.plotly_chart(fig, use_container_width=True)
 
 # =========================================================
-# 2️⃣ OPTION CHAIN (LIVE LINKED)
+# 2️⃣ LIVE OPTION CHAIN (MOVING WITH MARKET)
 # =========================================================
-st.subheader("📊 Options Chain (Live Linked to Index)")
+st.subheader("📊 Live Option Chain")
 
 colA, colB = st.columns(2)
 
 with colA:
-    st.markdown("### 📈 CALLS")
+    st.markdown("### CALLS")
 
-    for i, row in opt_df.iterrows():
+    for i, row in df.iterrows():
         if st.button(f"BUY CALL {row['Strike']}", key=f"c{i}"):
             st.session_state.positions.append(("CALL", row["Strike"], row["CALL"]))
             st.session_state.balance -= row["CALL"]
@@ -158,9 +143,9 @@ with colA:
         st.write(f"{row['Strike']} | {row['CALL']}")
 
 with colB:
-    st.markdown("### 📉 PUTS")
+    st.markdown("### PUTS")
 
-    for i, row in opt_df.iterrows():
+    for i, row in df.iterrows():
         if st.button(f"BUY PUT {row['Strike']}", key=f"p{i}"):
             st.session_state.positions.append(("PUT", row["Strike"], row["PUT"]))
             st.session_state.balance -= row["PUT"]
@@ -170,9 +155,9 @@ with colB:
 st.divider()
 
 # =========================================================
-# 3️⃣ PORTFOLIO + P&L ENGINE
+# 3️⃣ LIVE P&L SYSTEM
 # =========================================================
-st.subheader("💼 Trading Portfolio")
+st.subheader("💼 Live Positions")
 
 total_pnl = 0
 
@@ -190,57 +175,34 @@ for pos in st.session_state.positions:
 
     st.write(f"{typ} | Strike {strike} | Entry {entry:.2f} | P&L {pnl:.2f}")
 
-st.metric("Account Balance", round(st.session_state.balance, 2))
+st.metric("Balance", round(st.session_state.balance, 2))
 st.metric("Total P&L", round(total_pnl, 2))
 
-st.divider()
-
 # =========================================================
-# 4️⃣ PAYOFF GRAPH (OPTION EXPIRY VIEW)
+# 4️⃣ RSI LIVE CHART
 # =========================================================
-st.subheader("📉 Option Payoff Diagram (Expiry View)")
+st.subheader("📉 RSI Momentum")
 
-spot_range = np.linspace(price - 500, price + 500, 50)
+rsi_fig = go.Figure()
 
-payoff_call = np.maximum(spot_range - price, 0)
-payoff_put = np.maximum(price - spot_range, 0)
-
-fig2 = go.Figure()
-
-fig2.add_trace(go.Scatter(
-    x=spot_range,
-    y=payoff_call,
-    name="CALL Payoff",
-    line=dict(color="green")
+rsi_fig.add_trace(go.Scatter(
+    y=series,
+    name="Price",
+    line=dict(color="white")
 ))
 
-fig2.add_trace(go.Scatter(
-    x=spot_range,
-    y=payoff_put,
-    name="PUT Payoff",
-    line=dict(color="red")
+rsi_fig.add_trace(go.Scatter(
+    y=[rsi]*len(series),
+    name="RSI Trend",
+    line=dict(color="orange")
 ))
 
-fig2.update_layout(template="plotly_dark", height=400)
+rsi_fig.update_layout(template="plotly_dark", height=300)
 
-st.plotly_chart(fig2, use_container_width=True)
+st.plotly_chart(rsi_fig, use_container_width=True)
 
 # =========================================================
-# 5️⃣ INSTITUTIONAL SIGNAL PANEL
+# 5️⃣ AUTO REFRESH LOOP (LIVE FEEL)
 # =========================================================
-st.subheader("🧠 Institutional Signal Engine")
-
-st.write(f"""
-### 📌 Market Intelligence
-- RSI: {round(rsi,2)}
-- SMA Trend: {'Bullish' if df["SMA20"].iloc[-1] > df["SMA50"].iloc[-1] else 'Bearish'}
-- Volatility: High Simulation Mode
-
-### 🎯 Signal
-**{signal}**
-
-### 🏦 Strategy Logic
-- RSI oversold + trend up → CALL accumulation
-- RSI overbought + trend down → PUT accumulation
-- Otherwise → No trade zone
-""")
+time.sleep(1)
+st.rerun()
