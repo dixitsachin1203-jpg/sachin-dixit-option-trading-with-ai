@@ -6,159 +6,195 @@ import plotly.graph_objects as go
 # ---------------------------
 # PAGE CONFIG
 # ---------------------------
-st.set_page_config(page_title="Options Chain Simulator", layout="wide")
+st.set_page_config(page_title="Pro Trading Terminal", layout="wide")
 
-st.title("📊 Options Chain Trading Simulator (CALL vs PUT)")
-st.markdown("### Paper trading terminal with live-like option movement")
+st.title("📊 Pro Options Trading Terminal (Simulated)")
+st.markdown("### Live Index + Options Chain + Paper Trading")
 
 # ---------------------------
-# SESSION STATE (TRADING ACCOUNT)
+# SESSION STATE
 # ---------------------------
-if "balance" not in st.session_state:
-    st.session_state.balance = 100000
+if "price" not in st.session_state:
+    st.session_state.price = 22000
+
+if "positions" not in st.session_state:
     st.session_state.positions = []
 
-# ---------------------------
-# SIMULATED INDEX
-# ---------------------------
-base_price = 22000
+if "balance" not in st.session_state:
+    st.session_state.balance = 100000
 
-if "price" not in st.session_state:
-    st.session_state.price = base_price
+if "history" not in st.session_state:
+    st.session_state.history = [st.session_state.price]
 
-# simulate movement
-move = np.random.normal(0, 50)
+# ---------------------------
+# SIMULATED LIVE MARKET MOVEMENT
+# ---------------------------
+move = np.random.normal(0, 40)
 st.session_state.price += move
+st.session_state.history.append(st.session_state.price)
+
+# keep last 80 points
+st.session_state.history = st.session_state.history[-80:]
 
 index_price = st.session_state.price
 
 # ---------------------------
-# RSI SIMULATION
+# RSI (SIMPLIFIED)
 # ---------------------------
-rsi = np.random.randint(25, 75)
+series = pd.Series(st.session_state.history)
+delta = series.diff()
+gain = delta.where(delta > 0, 0).rolling(14).mean()
+loss = -delta.where(delta < 0, 0).rolling(14).mean()
+rs = gain / loss
+rsi = float(100 - (100 / (1 + rs)).iloc[-1])
 
 # ---------------------------
-# OPTION PRICING MODEL (SIMPLIFIED)
+# MARKET BIAS
 # ---------------------------
-def call_premium(strike, spot):
-    return max(0, spot - strike + np.random.uniform(80, 200))
+bias = "NEUTRAL 🟡"
 
-def put_premium(strike, spot):
-    return max(0, strike - spot + np.random.uniform(80, 200))
+if rsi < 30:
+    bias = "BULLISH 🟢 (CALL ZONE)"
+elif rsi > 70:
+    bias = "BEARISH 🔴 (PUT ZONE)"
 
 # ---------------------------
-# STRIKE GENERATION
+# OPTION PRICING MODEL
+# ---------------------------
+def call_price(strike, spot):
+    return max(10, (spot - strike) + np.random.uniform(80, 180))
+
+def put_price(strike, spot):
+    return max(10, (strike - spot) + np.random.uniform(80, 180))
+
+# ---------------------------
+# STRIKES GENERATION
 # ---------------------------
 strikes = [index_price + i for i in [-300, -200, -100, 0, 100, 200, 300]]
 
-data = []
-
-for strike in strikes:
-    data.append({
-        "Strike": strike,
-        "CALL": round(call_premium(strike, index_price), 2),
-        "PUT": round(put_premium(strike, index_price), 2)
+options = []
+for s in strikes:
+    options.append({
+        "Strike": round(s),
+        "CALL": round(call_price(s, index_price), 2),
+        "PUT": round(put_price(s, index_price), 2)
     })
 
-df = pd.DataFrame(data)
+df = pd.DataFrame(options)
 
 # ---------------------------
-# SIGNAL ENGINE
-# ---------------------------
-signal = "NEUTRAL 🟡"
-
-if rsi < 30:
-    signal = "BULLISH 🟢 (CALL BUY BIAS)"
-elif rsi > 70:
-    signal = "BEARISH 🔴 (PUT BUY BIAS)"
-
-# ---------------------------
-# UI TOP METRICS
+# TOP METRICS
 # ---------------------------
 col1, col2, col3 = st.columns(3)
 
-col1.metric("Index", round(index_price, 2))
-col2.metric("RSI", rsi)
-col3.metric("Market Bias", signal)
+col1.metric("Index Level", round(index_price, 2))
+col2.metric("RSI", round(rsi, 2))
+col3.metric("Market Bias", bias)
 
 st.divider()
 
 # ---------------------------
-# CALL & PUT TABLE SIDE BY SIDE
+# MAIN LAYOUT (CHART + OPTION CHAIN)
 # ---------------------------
-colA, colB = st.columns(2)
+left, right = st.columns([2, 1])
 
-with colA:
-    st.subheader("📈 CALL OPTIONS")
+# ---------------------------
+# LIVE INDEX CHART
+# ---------------------------
+with left:
+    st.subheader("📈 Live Index Chart")
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        y=st.session_state.history,
+        name="Index",
+        line=dict(color="white")
+    ))
+
+    fig.update_layout(
+        template="plotly_dark",
+        height=500
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+# ---------------------------
+# OPTION CHAIN + TRADING
+# ---------------------------
+with right:
+    st.subheader("📊 Option Chain")
+
     for i, row in df.iterrows():
-        if st.button(f"BUY CALL {row['Strike']}", key=f"call_{i}"):
-            st.session_state.positions.append(("CALL", row["Strike"], row["CALL"]))
-            st.session_state.balance -= row["CALL"]
 
-        st.write(f"Strike: {row['Strike']} | Premium: {row['CALL']}")
+        c1, c2 = st.columns(2)
 
-with colB:
-    st.subheader("📉 PUT OPTIONS")
-    for i, row in df.iterrows():
-        if st.button(f"BUY PUT {row['Strike']}", key=f"put_{i}"):
-            st.session_state.positions.append(("PUT", row["Strike"], row["PUT"]))
-            st.session_state.balance -= row["PUT"]
+        with c1:
+            if st.button(f"BUY CALL {row['Strike']}", key=f"c{i}"):
+                st.session_state.positions.append(
+                    ("CALL", row["Strike"], row["CALL"])
+                )
+                st.session_state.balance -= row["CALL"]
 
-        st.write(f"Strike: {row['Strike']} | Premium: {row['PUT']}")
+        with c2:
+            if st.button(f"BUY PUT {row['Strike']}", key=f"p{i}"):
+                st.session_state.positions.append(
+                    ("PUT", row["Strike"], row["PUT"])
+                )
+                st.session_state.balance -= row["PUT"]
+
+        st.write(f"Strike: {row['Strike']} | C: {row['CALL']} | P: {row['PUT']}")
 
 st.divider()
 
 # ---------------------------
-# PORTFOLIO / P&L
+# POSITIONS + P&L
 # ---------------------------
-st.subheader("💼 Paper Trading Portfolio")
+st.subheader("💼 Open Positions")
+
+total_pnl = 0
 
 if st.session_state.positions:
-    total_value = 0
 
-    for pos in st.session_state.positions:
-        typ, strike, premium = pos
-        pnl = np.random.uniform(-50, 150)  # simulated P&L
-        total_value += pnl
-        st.write(f"{typ} {strike} | Entry: {premium} | P&L: {round(pnl,2)}")
+    for i, pos in enumerate(st.session_state.positions):
 
-    st.metric("Account Balance", st.session_state.balance)
-    st.metric("Total P&L", round(total_value, 2))
+        typ, strike, entry = pos
+
+        # simulated live P&L
+        if typ == "CALL":
+            current = max(0, index_price - strike)
+        else:
+            current = max(0, strike - index_price)
+
+        pnl = current - entry
+        total_pnl += pnl
+
+        st.write(f"{typ} | Strike: {strike} | Entry: {entry:.2f} | P&L: {pnl:.2f}")
+
 else:
-    st.info("No positions yet")
+    st.info("No open positions")
 
 # ---------------------------
-# VISUAL CHART
+# ACCOUNT SUMMARY
 # ---------------------------
-fig = go.Figure()
+st.divider()
 
-fig.add_trace(go.Scatter(
-    y=df["CALL"],
-    name="CALL Premiums",
-    line=dict(color="green")
-))
+colA, colB = st.columns(2)
 
-fig.add_trace(go.Scatter(
-    y=df["PUT"],
-    name="PUT Premiums",
-    line=dict(color="red")
-))
-
-fig.update_layout(template="plotly_dark", title="Options Premium Curve")
-
-st.plotly_chart(fig, use_container_width=True)
+colA.metric("Account Balance", round(st.session_state.balance, 2))
+colB.metric("Total P&L", round(total_pnl, 2))
 
 # ---------------------------
-# FINAL INSIGHT
+# MARKET INSIGHT
 # ---------------------------
-st.subheader("🧠 Trading Signal Engine")
+st.subheader("🧠 Market Intelligence")
 
 st.write(f"""
-- Index Movement: Simulated live
-- RSI: {rsi}
-- Market Bias: {signal}
+- RSI: {round(rsi,2)}
+- Bias: {bias}
+- Trend: {'Bullish Momentum' if rsi < 30 else 'Bearish Pressure' if rsi > 70 else 'Sideways Market'}
 
-👉 Use CALL when bullish momentum  
-👉 Use PUT when bearish momentum  
-👉 Avoid trades in neutral zones
+👉 CALL options work better in bullish zones  
+👉 PUT options work better in bearish zones  
+👉 Avoid trading in neutral markets
 """)
